@@ -36,17 +36,41 @@
 
 #include <vector>
 
+#define NOMINMAX
+#include <windows.h>
+
 #include <omp.h>
 #include <string>
+#include <cassert>
 #include "OptFlowPatchMatch.h"
-
-
+#include "flowIO.h"
 
 template<typename T>
 T bilinear(const T* table, int W, int H, float x, float y, int stride = 1) {
+	// mirror / clamp
+	/*
+	if (x < 0) {
+		x = -x;
+		x = 0;
+	} else if (x > W - 1) {
+		x = 2*(W - 1) - x;
+		x = W - 1;
+	}
 
-	int i = std::max(0, std::min((int)y, H-2)); float fi = std::min(1.f, std::max(0.f, y-i));
-	int j = std::max(0, std::min((int)x, W-2)); float fj = std::min(1.f, std::max(0.f, x-j));
+	if (y < 0) {
+		y = -y;
+		y = 0;
+	}
+	else if (y > H - 1) {
+		y = 2*(H - 1) - y;
+		y = H - 1;
+	}
+	*/
+
+	int i = std::max(0, std::min((int)y, H-2));
+	float fi = std::min(1.f, std::max(0.f, y-i));
+	int j = std::max(0, std::min((int)x, W-2));
+	float fj = std::min(1.f, std::max(0.f, x-j));
 
 	return (table[(i*W + j)*stride] * (1.f - fi) + table[((i + 1)*W + j)*stride] * fi)*(1. - fj) + (table[(i*W + j + 1)*stride] * (1.f - fi) + table[((i + 1)*W + j + 1)*stride] * fi)*fj;
 }
@@ -67,11 +91,14 @@ double get_weight(const T* cur_frame, const T* prev_frame, int W, int H, const f
 	if ((flow[pix*2] >= W - 2) || (flow[pix*2] <= 2)
 		|| (flow[pix*2+1] >= H - 2) || (flow[pix*2+1] <= 2)) {  // going outside of the image area
 		w = 0.0000;
-	}
 
+		//int x = pix % W;
+		//int y = pix / W;
+		//std::cout << x << ":" << y << " ";
+		//std::cout << flow[pix * 2] << " " << flow[pix * 2 + 1] << std::endl;
+	}
 	return w;
 }
-
 
 template<typename T>
 void gauss_seidel(T* result_init, const T* processed, const T* diag, const T* rhs, const int W, const int H, const int niter) {
@@ -116,7 +143,6 @@ void gauss_seidel(T* result_init, const T* processed, const T* diag, const T* rh
 
 }
 
-
 template<typename T>
 void multiscale_solver(T* result_init, const T* processed, int W, int H, const T* diag, const T* rhs) {
 
@@ -144,18 +170,62 @@ void multiscale_solver(T* result_init, const T* processed, int W, int H, const T
 	}
 }
 
-
+long long milliseconds_now() {
+	static LARGE_INTEGER s_frequency;
+	static BOOL s_use_qpc = QueryPerformanceFrequency(&s_frequency);
+	if (s_use_qpc) {
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		return (1000LL * now.QuadPart) / s_frequency.QuadPart;
+	}
+	else {
+		return GetTickCount();
+	}
+}
 
 template<typename T>
-void solve_frame(const T* prevInput, const T* curInput, const T* curProcessed, const T* prevSolution, T* curSolution, int W, int H, double lambda_t, bool isFirstFrame) {
+void solve_frame(const T* prevInput, std::vector<float> flowBwd, const T* curInput, const T* curProcessed, const T* prevSolution, T* curSolution, int W, int H, double lambda_t, bool isFirstFrame) {
 
 	if (isFirstFrame) {
 		memcpy(curSolution, curProcessed, W*H*3*sizeof(T));
 		return;
 	}
 
-	std::vector<float> optflowBackward(W*H*2);	
-	opt_flow_patchmatch<T>(curInput, prevInput, W, H, &optflowBackward[0]);
+	long long of_elapsed = 0;
+
+	if (flowBwd.empty()) {
+		long long start = milliseconds_now();
+		flowBwd.resize(W * H * 2);
+		opt_flow_patchmatch<T>(curInput, prevInput, W, H, &flowBwd[0]);
+		long long end = milliseconds_now();
+		of_elapsed = end - start;
+	}
+	assert(flowBwd.size() == W * H * 2);
+
+	/*
+	std::vector<float> flowBwdOut(W * H * 2);
+	double mag = 0.0;
+	for (int y = 0; y < H; y++) {
+		for (int x = 0; x < W; x++) {
+			// should be negated!!
+			float u = (float) flowBwd[(size_t) (y * W + x) * 2 + 0]; // -x;
+			float v = (float) flowBwd[(size_t) (y * W + x) * 2 + 1]; // -y;
+			flowBwdOut[(size_t) (y * W + x) * 2 + 0] = u;
+			flowBwdOut[(size_t) (y * W + x) * 2 + 1] = v;
+			float m = std::sqrt(u * u + v * v);
+			mag += m;
+		}
+	}
+	mag = mag / (W * H);
+	//std::cout << "Mean mag: " << mag << std::endl;
+
+	std::string index = std::to_string(i);
+	index = std::string(6 - index.size(), '0') + index;
+	WriteFlowFile(flowBwdOut, W, H, "test_pwcnetraw/frame_" + index + "_bwd.flo");
+	i++;
+	*/
+
+	long long start = milliseconds_now();
 	
 	//build RHS and weights
 	std::vector<T> rhs(W*H*3, 0.);
@@ -163,7 +233,7 @@ void solve_frame(const T* prevInput, const T* curInput, const T* curProcessed, c
 #pragma omp parallel for
 	for (int i = 0; i < H; i++) {
 		for (int j = 0; j < W; j++) {
-			double w = lambda_t * get_weight(curInput, prevInput, W, H, &optflowBackward[0], i*W+j);
+			double w = lambda_t * get_weight(curInput, prevInput, W, H, &flowBwd[0], i*W+j);
 			int laplace = 4;
 			if (i == 0 || i == H - 1) laplace--;
 			if (j == 0 || j == W - 1) laplace--;
@@ -175,7 +245,7 @@ void solve_frame(const T* prevInput, const T* curInput, const T* curProcessed, c
 				const T downProcessed = i<(H-1)?curProcessed[p + 3*W]:0.;
 				const T leftProcessed = j>0?curProcessed[p - 3]:0.;
 				const T rightProcessed = j<(W-1)?curProcessed[p + 3]:0.;
-				const T backward_color = bilinear(&prevSolution[k], W, H, optflowBackward[pix * 2], optflowBackward[pix * 2 + 1], 3);
+				const T backward_color = bilinear(&prevSolution[k], W, H, flowBwd[pix * 2], flowBwd[pix * 2 + 1], 3);
 				rhs[p] = laplace*curProcessed[p] - upProcessed - downProcessed - leftProcessed - rightProcessed  + w * backward_color;
 			}
 			diag[i*W+j] = laplace + w;
@@ -183,5 +253,10 @@ void solve_frame(const T* prevInput, const T* curInput, const T* curProcessed, c
 	}
 
 	multiscale_solver(curSolution, curProcessed, W, H, &diag[0], &rhs[0]);
+
+	long long end = milliseconds_now();
+	long long optimize_elapsed = end - start;
+	std::cout << "Optical flow time: " << of_elapsed << std::endl;
+	std::cout << "Stabilization time: " << optimize_elapsed << std::endl;
 }
 

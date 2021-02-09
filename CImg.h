@@ -126,6 +126,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#define NOMINMAX
 #include <windows.h>
 #ifndef _WIN32_IE
 #define _WIN32_IE 0x0400
@@ -43108,6 +43109,7 @@ namespace cimg {
   // End of cimg_library:: namespace
 }
 
+/*
 #ifdef _cimg_redefine_None
 #define None 0
 #endif
@@ -43120,6 +43122,10 @@ namespace cimg {
 #ifdef _cimg_redefine_PI
 #define PI 3.141592653589793238462643383
 #endif
+*/
+
+#undef min
+#undef max
 
 #endif
 // Local Variables:

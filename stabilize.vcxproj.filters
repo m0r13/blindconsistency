@@ -45,12 +45,24 @@
     <ClCompile Include="regularization.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="flowIO.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="OptFlowPatchMatch.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="regularization.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="avbin.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CImg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="flowIO.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

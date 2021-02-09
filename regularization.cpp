@@ -41,6 +41,7 @@
 #include <string>
 #include <algorithm>
 #include <iostream>
+#include <cassert>
 
 using namespace std;
 
@@ -66,21 +67,56 @@ std::string extract_fileext(std::string &path) {
 	return fileext;
 }
 
+int i = 0;
+
+template<class T>
+constexpr const T& clamp(const T& v, const T& lo, const T& hi)
+{
+	assert(!(hi < lo));
+	return (v < lo) ? lo : (hi < v) ? hi : v;
+}
+
+std::vector<float> readFlow(std::string path, int W, int H) {
+	std::vector<float> flow;
+	ReadFlowFile(flow, path);
+	assert(flow.size() == (size_t) W * H * 2);
+
+	for (int y = 0; y < H; y++) {
+		for (int x = 0; x < W; x++) {
+			float& u = flow[(size_t) (y * W + x) * 2 + 0];
+			float& v = flow[(size_t) (y * W + x) * 2 + 1];
+			//u = clamp(x + u, 0.0f, (float) W - 1);
+			//v = clamp(y + v, 0.0f, (float) H - 1);;
+			u = x + u;
+			v = y + v;
+			if (u >= W - 2 || u <= 2 || v >= H - 2 || v <= 2) {
+				//u = 512.0;
+				//v = 250.0;
+				// this is how the patchmatch output looks like
+				u = 0.0;
+				v = 0.0;
+			}
+		}
+	}
+	return flow;
+}
+
 int main(int argc, const char* argv[]) {
 
 	
 	std::string infile(argv[1]);
-	std::string processedfile(argv[2]);
-	float lambdaT = atof(argv[3]);
-	std::string outfile(argv[4]);
-	int nbframes = std::atoi(argv[5]); // max # frames to process
+	std::string inflow(argv[2]);
+	std::string processedfile(argv[3]);
+	float lambdaT = atof(argv[4]);
+	std::string outfile(argv[5]);
+	int nbframes = std::atoi(argv[6]); // max # frames to process
 
 	VideoStreamer<float> *instreamer;
 	VideoStreamer<float> *processedstreamer;
 	VideoRecorder<float> *outputsRec;
 
 	int W, H;
-	if (argc>6) {
+	if (argc>7) {
 		W = atoi(argv[6]);
 		H = atoi(argv[7]);
 	}
@@ -132,6 +168,16 @@ int main(int argc, const char* argv[]) {
 	std::vector<float> prevSolution(W*H*3);
 	std::vector<float> curSolution(W*H*3);
 
+	//std::cout << "Number frames" << nbframes << std::endl;
+	//return 0;
+
+	auto flowPath = [inflow](int i) {
+		std::string flowIndex = std::to_string(i);
+		// zero padding to 6 digits
+		flowIndex = std::string(6 - flowIndex.size(), '0') + flowIndex;
+		std::string path = inflow + "/frame_" + flowIndex + "_bwd.flo";
+		return path;
+	};
 
 	for (int i=0; i<nbframes; i++) {
 
@@ -139,8 +185,14 @@ int main(int argc, const char* argv[]) {
 		if (!instreamer->get_next_frame(&curInput[0])) break;
 		if (!processedstreamer->get_next_frame(&curProcessed[0])) break;
 
+		std::vector<float> flowBwd;
+		if (inflow != "-") {
+			flowBwd = readFlow(flowPath(i), W, H);
+			assert(flowBwd.size() == (size_t) W * H * 2);
+		}
+
 		curSolution = curProcessed;
-		solve_frame<float>(&prevInput[0], &curInput[0], &curProcessed[0], &prevSolution[0], &curSolution[0], W, H, lambdaT, i==0);		
+		solve_frame<float>(&prevInput[0], flowBwd, &curInput[0], &curProcessed[0], &prevSolution[0], &curSolution[0], W, H, lambdaT, i==0);		
 
 		prevInput = curInput;
 		prevSolution = curSolution;		

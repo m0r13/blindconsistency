@@ -8,6 +8,7 @@
 #include "simpatch.h"
 #include <algorithm>
 #ifndef UNIX_MODE
+#define _SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS
 #include <hash_set>
 #endif
 
